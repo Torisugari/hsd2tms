@@ -12,7 +12,7 @@ libpngが必要です。
 ###コマンド例
 例えば、
 
- git clone https://github.com/Torisugari/hsd2tms.git
+    git clone https://github.com/Torisugari/hsd2tms.git
     cd hsd2tms
     mkdir build
     cd build
