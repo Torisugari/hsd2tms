@@ -1,0 +1,15 @@
+# XXX GOTO /tmp/
+mkdir ${PROJECT_BINARY_DIR}/data
+
+wget -P ${PROJECT_BINARY_DIR}/data http://www.data.jma.go.jp/mscweb/en/himawari89/space_segment/hsd_sampleA/HS_H08_20150125_0230_B01_FLDK.zip
+wget -P ${PROJECT_BINARY_DIR}/data http://www.data.jma.go.jp/mscweb/en/himawari89/space_segment/hsd_sampleA/HS_H08_20150125_0230_B02_FLDK.zip
+wget -P ${PROJECT_BINARY_DIR}/data http://www.data.jma.go.jp/mscweb/en/himawari89/space_segment/hsd_sampleA/HS_H08_20150125_0230_B03_FLDK.zip
+
+unzip ${PROJECT_BINARY_DIR}/data/\*zip -d ${PROJECT_BINARY_DIR}/data/
+bzip2 -d ${PROJECT_BINARY_DIR}/data/*.bz2
+
+${PROJECT_BINARY_DIR}/${PROJECT_NAME} ${PROJECT_BINARY_DIR}/data/*.DAT
+
+rm ${PROJECT_BINARY_DIR}/data/*.DAT
+rm ${PROJECT_BINARY_DIR}/data/*.bz2
+
