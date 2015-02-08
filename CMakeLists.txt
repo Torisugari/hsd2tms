@@ -56,5 +56,5 @@ ADD_CUSTOM_TARGET(test /bin/bash test.sh)
 
 
 add_executable(${PROJECT_NAME}
-               src/main.cpp)
+               src/main.cpp src/hsd2tms.cpp)
 

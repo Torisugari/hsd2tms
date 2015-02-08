@@ -223,15 +223,15 @@ struct NavigationInfoBlockBody{
 
 //ID = 5
 struct CalibrationInfoBlockBodyInfrared {
-  double_t d1;
-  double_t d2;
-  double_t d3;
-  double_t d4;
-  double_t d5;
-  double_t d6;
-  double_t d7;
-  double_t d8;
-  double_t d9;
+  double_t mC0;
+  double_t mC1;
+  double_t mC2;
+  double_t mC02;
+  double_t mC12;
+  double_t mC22;
+  double_t mC;
+  double_t mH;
+  double_t mK;
 };
 
 struct CalibrationInfoBlockBodyVisible {
@@ -242,11 +242,11 @@ struct CalibrationInfoBlockBodyVisible {
 struct CalibrationInfoBlockBody {
   uint16_t mBand;
   double_t mWaveLength;
-  uint16_t mBitPix;
+  uint16_t mValidBits;
   uint16_t mErrorCount;
   uint16_t mOutCount;
-  double_t d1;
-  double_t d2;
+  double_t mCoefficient;
+  double_t mConstant;
   union u {
     CalibrationInfoBlockBodyInfrared infrared;
     CalibrationInfoBlockBodyVisible visible;
@@ -554,7 +554,7 @@ struct HimawariStandardDataSegment {
     fclose(fp);
   }
 
-  uint16_t dataAt(int32_t aX, int32_t aY) {
+  uint16_t countAt(int32_t aX, int32_t aY) {
     aY -= mSegmentInfoBlock.body.mSegmentOffsetY;
     if ((aY < 0 || mDataInfoBlock.body.mHeight <= aY) ||
         (aX < 0 || mDataInfoBlock.body.mWidth  <= aX)) {
@@ -571,24 +571,39 @@ struct HimawariStandardDataSegment {
   }
 };
 
+enum DataType {
+  TypeRadiation,
+  TypeTemperature
+};
+
 struct HimawariStandardDataBand {
+  HimawariStandardDataBand() {}
   std::vector<HimawariStandardDataSegment*> mSegments;
 
-  struct Compare {
-    Compare() {}
+  struct LineCompare {
+    LineCompare() {}
     bool operator() (const HimawariStandardDataSegment* aItem,
-                     const int32_t& aInt) {
+                     const int32_t& aInt) const {
       return aItem->mSegmentInfoBlock.body.mSegmentOffsetY < aInt;
     }
 
     bool operator() (const int32_t& aInt,
-                     const HimawariStandardDataSegment* aItem) {
+                     const HimawariStandardDataSegment* aItem) const {
       return aInt < aItem->mSegmentInfoBlock.body.mSegmentOffsetY;
     }
   };
 
-  uint16_t dataAt(double aLongitude, double aLatitude) {
-    if (0 == mSegments.size()) {
+  struct SegmentCompare {
+    SegmentCompare() {}
+    bool operator() (const HimawariStandardDataSegment* aItemL,
+                     const HimawariStandardDataSegment* aItemR) const {
+      return aItemL->mSegmentInfoBlock.body.mSegmentOffsetY <
+             aItemR->mSegmentInfoBlock.body.mSegmentOffsetY;
+    }
+  };
+
+  inline uint16_t countAt(double aLongitude, double aLatitude) const {
+    if (!hasData()) {
       return 0;
     }
     double dataX = 0.;
@@ -600,7 +615,7 @@ struct HimawariStandardDataBand {
 
     int32_t intX = int32_t(dataX + 0.5);
     int32_t intY = int32_t(dataY + 0.5);
-    static const Compare comp;
+    static const LineCompare comp;
     auto itr = upper_bound(mSegments.begin(), mSegments.end(), intY, comp);
     if (mSegments.begin() == itr) {
       return 0;
@@ -608,27 +623,158 @@ struct HimawariStandardDataBand {
     else {
       itr--;
     }
-    return (*itr)->dataAt(intX, intY);
+    return (*itr)->countAt(intX, intY);
+  }
+
+  bool hasData() const {
+    return !mSegments.empty();
+  }
+
+  double radiationAt(double aLongitude, double aLatitude) const {
+    uint16_t count = countAt(aLongitude, aLatitude);
+
+    if (count & 0x8000) {
+      // 0xFFFF : Error
+      // 0xFFFE : Out of scope
+      return 0.;
+    }
+
+    const CalibrationInfoBlockBody& calibration =
+      mSegments[0]->mCalibrationInfoBlock.body;
+    count &= (0xFFFF >> (16 - calibration.mValidBits));
+    return (double(count) * calibration.mCoefficient) + calibration.mConstant;
+  }
+
+  uint8_t normalizedRadiationAt(double aLongitude, double aLatitude) const {
+    double radiation = radiationAt(aLongitude, aLatitude);
+    static const double kMaxRadiation[16] = 
+      {300., 280., 260., 300., 40., 10., 1., 1.5, 3., 3., 3., 3., 3., 3., 3., 3.};
+#if 0
+band: 0
+championR: 596.924
+band: 1
+championR: 570.674
+band: 2
+championR: 526.357
+band: 3
+championR: 313.535
+band: 4
+championR: 42.1191
+band: 5
+championR: 10.1764
+band: 6
+championR: 0.981368
+band: 7
+championR: 1.44067
+band: 8
+championR: 2.85773
+
+#endif
+    uint8_t band = mSegments[0]->band() - 1;
+    const double& max = kMaxRadiation[(band & 0xF)];
+    return (max < radiation)? 0xFF : uint8_t((radiation * 255.) / max);
+  }
+
+  double temperatureAt(double aLongitude, double aLatitude) const {
+    const double rad = radiationAt(aLongitude, aLatitude) * 1000000.;
+    const CalibrationInfoBlockBody& calibration =
+      mSegments[0]->mCalibrationInfoBlock.body;
+    const CalibrationInfoBlockBodyInfrared& infrared = calibration.u.infrared;
+
+    const double& h = infrared.mH;
+    const double& c = infrared.mC;
+    const double& k = infrared.mK;
+    const double l = calibration.mWaveLength / 1000000.;
+
+    double tmp = log(1. + (2. * h * pow(c, 2) / (pow(l, 5) * rad)));
+    return (h * c) / (k * l * tmp) ;
+  }
+
+  uint8_t normalizedTemperatureAt(double aLongitude, double aLatitude) const {
+    double temperature = temperatureAt(aLongitude, aLatitude);
+    temperature -= 273.15;
+
+    if (temperature < -40.) {
+      temperature = - 40.;
+    }
+
+    if (40. <= temperature) {
+      temperature = 40.;
+    }
+
+    uint32_t norm = floor((temperature + 40. ) * 255. / 80.);
+    return uint8_t(norm);
+  }
+
+  uint8_t normalizedDataAt(double aLongitude, double aLatitude,
+                           DataType aType) const {
+    switch(aType) {
+      case TypeRadiation:
+        return normalizedRadiationAt(aLongitude, aLatitude);
+        break;
+      case TypeTemperature:
+        return normalizedTemperatureAt(aLongitude, aLatitude);
+        break;
+    }
+    return 0;
+  }
+
+  inline void sort() {
+    static const SegmentCompare comp;
+    std::sort(mSegments.begin(), mSegments.end(), comp);
   }
 };
 
 struct HimawariStandardData {
   std::vector<HimawariStandardDataSegment> mSegments;
-  HimawariStandardDataBand mRed;
-  HimawariStandardDataBand mGreen;
-  HimawariStandardDataBand mBlue;
+  HimawariStandardDataBand mBands[16];
 
   void append(const char* aFileName) {
     mSegments.emplace_back();
     HimawariStandardDataSegment& segment(mSegments.back());
     HimawariStandardDataSegment* ptr = &segment;
     segment.readFile(aFileName);
-    switch (segment.band()) {
-      case 1: mBlue.mSegments.push_back(ptr);break;
-      case 2: mGreen.mSegments.push_back(ptr);break;
-      case 3: mRed.mSegments.push_back(ptr);break;
-      default: break;
+
+    int32_t band = segment.band();
+    assert(1 <= band && band <= 16);
+    mBands[band - 1].mSegments.push_back(ptr);
+  }
+
+  void sort() {
+    for (int32_t i = 0; i < 16; i++) {
+      mBands[i].sort();
     }
+  }
+  bool hasRGB()  {
+    return red().hasData() || green().hasData() || blue().hasData();
+  }
+
+  const HimawariStandardDataBand& red() const {
+    return mBands[2];
+  }
+
+  const HimawariStandardDataBand& green() const {
+    return mBands[1];
+  }
+
+  const HimawariStandardDataBand& blue() const {
+    return mBands[0];
+  }
+
+  inline static const char* typeTag(DataType aType) {
+    static const char rad[] = "rad";
+    static const char tem[] = "tem";
+    static const char unknown[] = "unknown";
+
+    switch(aType) {
+      case TypeRadiation:
+        return rad;
+        break;
+      case TypeTemperature:
+        return tem;
+        break;
+    }
+    return unknown;
   }
 };
 } // hsd2tms
