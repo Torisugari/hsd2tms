@@ -6,7 +6,7 @@ compiler:
 before_script:
   - sudo apt-get update -qq
   - sudo apt-get install -qq libpng-dev
-  - sudo apt-get install -y cpputest
+  - sudo apt-get install -y libcpputest-dev
   - mkdir build
   - cd build
   - cmake ..
