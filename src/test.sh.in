@@ -1,16 +1,3 @@
-mkdir ${PROJECT_BINARY_DIR}/data
-mkdir /tmp/${PROJECT_NAME}
-
-wget -P ${PROJECT_BINARY_DIR}/data http://www.data.jma.go.jp/mscweb/en/himawari89/space_segment/hsd_sampleA/HS_H08_20150125_0230_B01_FLDK.zip
-wget -P ${PROJECT_BINARY_DIR}/data http://www.data.jma.go.jp/mscweb/en/himawari89/space_segment/hsd_sampleA/HS_H08_20150125_0230_B02_FLDK.zip
-wget -P ${PROJECT_BINARY_DIR}/data http://www.data.jma.go.jp/mscweb/en/himawari89/space_segment/hsd_sampleA/HS_H08_20150125_0230_B03_FLDK.zip
-
-unzip ${PROJECT_BINARY_DIR}/data/\*zip -d /tmp/${PROJECT_NAME}/
-bzip2 -d /tmp/${PROJECT_NAME}/*.bz2
-mv /tmp/${PROJECT_NAME}/*.DAT ${PROJECT_BINARY_DIR}/data
-
-rm -r /tmp/${PROJECT_NAME}
-
-${PROJECT_BINARY_DIR}/${PROJECT_NAME} ${PROJECT_BINARY_DIR}/data/*.DAT
+${PROJECT_BINARY_DIR}/${PROJECT_NAME} ${PROJECT_SOURCE_DIR}/test/HS_H08_20150125_0230_JP02/*.DAT
 
 

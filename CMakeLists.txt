@@ -6,11 +6,19 @@ include(FindPkgConfig)
 include(GNUInstallDirs)
 include(InstallRequiredSystemLibraries)
 
-# cairo
+# libpng
 pkg_check_modules(LIBPNG libpng)
 INCLUDE_DIRECTORIES(${LIBPNG_INCLUDE_DIRS})
 LINK_DIRECTORIES(${LIBPNG_LIBRARY_DIRS})
 LINK_LIBRARIES(${LIBPNG_LIBRARIES})
+
+add_definitions(
+  -DCTOP_LUT_MT2_V20_PATH=\"${CMAKE_SOURCE_DIR}/data/LUT/CTOP_LUT.mt2.v20.grd\"
+)
+
+add_definitions(
+  -DHIMAWARI_TEST_DATA_DIR_PATH=\"${CMAKE_SOURCE_DIR}/test/HS_H08_20150125_0230_JP02/\"
+)
 
 set(CMAKE_C_FLAGS "-Wall")
 set(CMAKE_CXX_FLAGS "-Wall -std=c++11")
@@ -22,8 +30,8 @@ ADD_CUSTOM_TARGET(release
                     ${CMAKE_COMMAND}
                       -DCMAKE_BUILD_TYPE:STRING=Release ${PROJECT_SOURCE_DIR})
 
-set(CMAKE_C_FLAGS_DEBUG "-O0 -g -DDEBUG")
-set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g -DDEBUG")
+set(CMAKE_C_FLAGS_DEBUG "-O0 -g -DDEBUG -pg")
+set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g -DDEBUG -pg")
 set(CMAKE_C_FLAGS_RELEASE "-O2 -DNDEBUG")
 set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG")
 
@@ -42,19 +50,27 @@ if (CMAKE_BUILD_TYPE MATCHES "Scan")
   set(CMAKE_CXX_COMPILER "/usr/share/clang/scan-build/c++-analyzer")
 endif(CMAKE_BUILD_TYPE MATCHES "Scan")
 
-# Make sure to link to Harfbuzz's since it may be installed locally atm.
-option(USE_LOCAL_HARFBUZZ "Use local harfbuzz instead of distro's" ON)
-if(USE_LOCAL_HARFBUZZ)
-  set(CMAKE_INSTALL_RPATH "${HARFBUZZ_LIBRARY_DIRS}")
-  set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
-endif(USE_LOCAL_HARFBUZZ)
-
 configure_file("${PROJECT_SOURCE_DIR}/src/test.sh.in"
                test.sh)
-
 ADD_CUSTOM_TARGET(test /bin/bash test.sh)
 
 
-add_executable(${PROJECT_NAME}
-               src/main.cpp src/hsd2tms.cpp)
+add_library(${PROJECT_NAME}util STATIC src/hsd2tms.cpp)
+add_executable(${PROJECT_NAME} src/main.cpp)
+target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME}util)
 
+
+option(USE_MAKE_CHECK "Enaables 'make check' command." ON)
+
+# cpputest
+if (USE_MAKE_CHECK)
+  pkg_check_modules(CPPUTEST cpputest)
+  INCLUDE_DIRECTORIES(${CPPUTEST_INCLUDE_DIRS})
+  LINK_DIRECTORIES(${CPPUTEST_LIBRARY_DIRS})
+  LINK_LIBRARIES(${CPPUTEST_LIBRARIES})
+
+  add_executable(utest src/utestmain.cpp)
+  target_link_libraries(utest ${PROJECT_NAME}util)
+  target_link_libraries(utest CppUTest)
+  add_custom_target(check ${PROJECT_BINARY_DIR}/utest -v)
+endif ()

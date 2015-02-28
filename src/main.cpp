@@ -19,24 +19,9 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-
-
-
 #include "hsd2tms.h"
 #include <iostream>
 #include <chrono>
-#ifdef DEBUG
-// Int
-#define DUMPI(_VAR_) std::cout << #_VAR_ ": " << uint32_t(_VAR_) << std::endl
-// Float
-#define DUMPF(_VAR_) std::cout << #_VAR_ ": " << double(_VAR_) << std::endl
-// String
-#define DUMPS(_VAR_) std::cout << #_VAR_ ": " << \
-  std::string(_VAR_, sizeof(_VAR_)) << std::endl
-#define DUMPB(_VAR_) std::cout << #_VAR_ ": " << \
-  _VAR_? "true" : "false"  << std::endl
-#endif
-
 namespace hsd2tms {
 void createTiles(uint32_t aMaxZoomLevel, const HimawariStandardData& aData,
                  DataType aType,
@@ -142,32 +127,34 @@ void createJapanTiles(int32_t aMinZoomLevel, const HimawariStandardData& aData,
 
 int main (int argc, char* argv[]) {
   auto start = std::chrono::system_clock::now();
-
-  hsd2tms::HimawariStandardData himawariData;
-  himawariData.mSegments.reserve(argc - 1);
-
+  hsd2tms::HimawariStandardData himawariData(argc - 1);
   for (int i = 1; i < argc; i++) {
     himawariData.append(argv[i]);
   }
-
   himawariData.sort();
 
+  hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 0, 1, 2);
+  hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 3, 4, 5);
+#if 0
   hsd2tms::createTiles(6, himawariData, hsd2tms::TypeRadiation, 0, 1, 2);
-  hsd2tms::createJapanTiles(7, himawariData, hsd2tms::TypeRadiation, 0, 1, 2);
+
   hsd2tms::createTiles(6, himawariData, hsd2tms::TypeRadiation, 3, 4, 5);
-  hsd2tms::createJapanTiles(7, himawariData, hsd2tms::TypeRadiation, 3, 4, 5);
   hsd2tms::createTiles(5, himawariData, hsd2tms::TypeTemperature, 14);
+
+  hsd2tms::CloudTopAltitude cta;
+  hsd2tms::createAltitudeFile(6, 58, 25, himawariData, cta);
+  hsd2tms::createTile(6, 58, 25, himawariData,
+                      hsd2tms::TypeRadiation, 0, 1, 2);
+#endif
 
   auto end = std::chrono::system_clock::now();
   std::cout << "Duration: "
             << std::chrono::duration_cast
                  <std::chrono::microseconds>(end - start).count()
-            << " micro seconds\n";
-
-  std::cout << "Duration: "
+            << " micro seconds ("
             << (std::chrono::duration_cast
                   <std::chrono::seconds>(end - start).count() / 60)
-            << " minutes\n";
-
+            << " minutes)\n";
   return 0;
 }
+

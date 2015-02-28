@@ -22,10 +22,10 @@
 #ifndef TILE_MAP_SERVICE
 #define TILE_MAP_SERVICE
 #include <math.h>
-#include <vector>
 namespace hsd2tms {
 class TileMapService {
 private:
+  uint32_t mX, mY, mZ;
   double mDotWidth;
   double mDotHeight;
   double mLeft;
@@ -40,6 +40,10 @@ private:
   }
 public:
   void init(uint32_t aZ, uint32_t aX, uint32_t aY) {
+    mX = aX;
+    mY = aY;
+    mZ = aZ;
+
     uint32_t scale = 1 << aZ;
     assert(aX < scale && aY < scale);
 
@@ -59,16 +63,24 @@ public:
     mTop = globalTop - (imageHeight * aY) - (mDotHeight * 0.5);
   }
 
-  double latitude (uint32_t aRow) const {
+  double latitude(uint32_t aRow) const {
+    assert(aRow < 0x100);
     double y = mTop - (mDotHeight * double(aRow));
     return gudermannian(y);
   }
 
-  double longitude (uint32_t aColmun) const {
+  double longitude(uint32_t aColmun) const {
+    assert(aColmun < 0x100);
     return mLeft + (mDotWidth * double(aColmun));
   }
-};
 
+  double kmPerDot() const {
+    double y = mTop - (mDotHeight * 127.5);
+    double lat = gudermannian(y);
+    static const double Cpol = 40007.88;
+    return Cpol * cos(lat) / double(uint32_t((1 << (mZ)) * 256));
+  }
+};
 
 } //hsd2tms
 #endif

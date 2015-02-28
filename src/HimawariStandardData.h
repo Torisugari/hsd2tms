@@ -474,9 +474,8 @@ struct HimawariStandardDataSegment {
   std::vector<uint16_t> mData;
 
   bool isInfrared() const {
-    return ((0 == strncmp("MTSAT-2", mBasicInfoBlock.body.mSatelliteName,
-               sizeof("MTSAT-2"))) && mCalibrationInfoBlock.body.mBand > 1) ||
-    mCalibrationInfoBlock.body.mBand > 6;
+    bool isHimawari7 = mBasicInfoBlock.body.mFlag1 & 0x01;
+    return isHimawari7? (band() >= 2) : (band() >= 7);
   }
 
   template <typename T>
@@ -532,6 +531,7 @@ struct HimawariStandardDataSegment {
 
   void readFile(const char* aFileName) {
     FILE *fp = fopen(aFileName, "rb");
+    assert(fp);
 
     size_t read = readBlock(fp, mBasicInfoBlock, 1);
     read += readBlock(fp, mDataInfoBlock, 2);
@@ -560,7 +560,7 @@ struct HimawariStandardDataSegment {
         (aX < 0 || mDataInfoBlock.body.mWidth  <= aX)) {
       return 0;
     }
-    int32_t index = aY * mDataInfoBlock.body.mWidth + aX;
+    int32_t index = (aY * mDataInfoBlock.body.mWidth) + aX;
     if ( index < 0 || int32_t(mData.size()) <= index) {
       return 0;
     }
@@ -568,6 +568,54 @@ struct HimawariStandardDataSegment {
   }
   uint8_t band() const {
     return mCalibrationInfoBlock.body.mBand;
+  }
+
+  inline static double radius(double aLatitude) {
+    const double req = 6378.1370;
+    const double rpl = 6356.7523;
+    double rsq = pow(req * cos(aLatitude), 2) + pow(rpl * sin(aLatitude), 2);
+    return sqrt(rsq);
+  }
+
+  double zenith(double aLongitude, double aLatitude) const {
+    const double& sublon = mNavigationInfoBlock.body.mSSPLongitude;
+    const double& sublat = mNavigationInfoBlock.body.mSSPLatitude;
+    const double& d =  mNavigationInfoBlock.body.mDistance;
+
+    double gSubLonRad = sublon * M_PI / 180.;
+    double gSubLatRad = sublat * M_PI / 180.;
+
+    const double r1 = radius(aLatitude);
+
+    // cos(A) = (b^2 + c^2 - a^2) / 2 * b * c  /*  cosine formula */
+    // A = arccos((b^2 + c^2 - a^2) / 2 * b * c)
+    // b == c == 1 -> A = arccos(1 - ((a^2) / 2))
+    //
+    // distance = |p(r, theta, phi) - p(r, 0, 0)| = |p(x, y, z) - p(r, 0, 0)|
+    // z = r * sin(phi)
+    // x = r * cos(phi) * cos(theta)
+    // y = r * cos(phi) * sin(theta)
+    // distance^2 = (r - x)^2 + y^2 + z^2;
+    // r = 1 -> b = 1, c = 1, distance^2  = a^2
+    // distance^2 = 1 - 2cos(theta)cos(phi) + cos^2(theta)cos^2(phi) +
+    //              sin^2(theta)cos^2(phi) + sin^2(phi)
+    //            = 2 - 2cos(theta)cos(phi)
+    // i.e. A = arccos(cos(theta)cos(phi))
+    //
+    // Another solution:
+    // cos(A) = x / r
+    //        = cos(theta)cos(phi)
+    // i.e. A = arccos(cos(theta)cos(phi))
+    //
+    // tan(zenith) = parpendicular / foot
+    //             = d * sin(A) / {(d * cosA) - r}
+    double cosA = cos(aLongitude - gSubLonRad) * cos(aLatitude - gSubLatRad);
+    double sinA = sqrt(1. - pow(cosA, 2));
+    double foot = (d * cosA) - r1;
+    if (0. == foot) {
+      return M_PI / 2.;
+    }
+    return atan(d * sinA / foot);
   }
 };
 
@@ -648,7 +696,8 @@ struct HimawariStandardDataBand {
   uint8_t normalizedRadiationAt(double aLongitude, double aLatitude) const {
     double radiation = radiationAt(aLongitude, aLatitude);
     static const double kMaxRadiation[16] = 
-      {300., 280., 260., 300., 40., 10., 1., 1.5, 3., 3., 3., 3., 3., 3., 3., 3.};
+      {300., 280., 260., 300., 40., 10., 1., 1.5,
+       3., 3., 3., 3., 3., 3., 3., 3.};
 #if 0
 band: 0
 championR: 596.924
@@ -690,6 +739,19 @@ championR: 2.85773
     return (h * c) / (k * l * tmp) ;
   }
 
+  double brightnessTemperatureAt(double aLongitude, double aLatitude) const {
+    const double t = temperatureAt(aLongitude, aLatitude);
+    const CalibrationInfoBlockBody& calibration =
+      mSegments[0]->mCalibrationInfoBlock.body;
+    const CalibrationInfoBlockBodyInfrared& infrared = calibration.u.infrared;
+
+    const double& c0 = infrared.mC0;
+    const double& c1 = infrared.mC1;
+    const double& c2 = infrared.mC2;
+
+    return c0 + (c1 * t) + (c2 * pow(t, 2));
+  }
+
   uint8_t normalizedTemperatureAt(double aLongitude, double aLatitude) const {
     double temperature = temperatureAt(aLongitude, aLatitude);
     temperature -= 273.15;
@@ -726,39 +788,41 @@ championR: 2.85773
 };
 
 struct HimawariStandardData {
+
   std::vector<HimawariStandardDataSegment> mSegments;
   HimawariStandardDataBand mBands[16];
+
+  HimawariStandardData() {}
+  HimawariStandardData(uint32_t aHint) {
+    mSegments.reserve(aHint);
+  }
 
   void append(const char* aFileName) {
     mSegments.emplace_back();
     HimawariStandardDataSegment& segment(mSegments.back());
-    HimawariStandardDataSegment* ptr = &segment;
     segment.readFile(aFileName);
-
-    int32_t band = segment.band();
-    assert(1 <= band && band <= 16);
-    mBands[band - 1].mSegments.push_back(ptr);
   }
 
   void sort() {
-    for (int32_t i = 0; i < 16; i++) {
-      mBands[i].sort();
+    for (HimawariStandardDataSegment& segment: mSegments) {
+      int32_t bandID = segment.band();
+      assert(1 <= bandID && bandID <= 16);
+      mBands[bandID - 1].mSegments.push_back(&segment);
+    }
+
+    for (HimawariStandardDataBand& band: mBands) {
+      band.sort();
     }
   }
-  bool hasRGB()  {
-    return red().hasData() || green().hasData() || blue().hasData();
-  }
 
-  const HimawariStandardDataBand& red() const {
-    return mBands[2];
-  }
-
-  const HimawariStandardDataBand& green() const {
-    return mBands[1];
-  }
-
-  const HimawariStandardDataBand& blue() const {
-    return mBands[0];
+  void brightnessTemperaturesAt(double longitude, double latitude,
+                                double& aTb11, double& aTb12) const {
+    // aTb11: The brightness temperture of wavelength 11 [micro meter]
+    // aTb12: That of 12 [um]
+    aTb11 = (mBands[13].hasData())? 
+      mBands[13].brightnessTemperatureAt(longitude, latitude) : 0.;
+    aTb12 = (mBands[14].hasData())? 
+      mBands[14].brightnessTemperatureAt(longitude, latitude) : 0.;
   }
 
   inline static const char* typeTag(DataType aType) {

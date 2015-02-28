@@ -3,7 +3,7 @@
 #include <iomanip>
 #include <sstream>
 #include <sys/stat.h>
-
+#include <fstream>
 namespace hsd2tms {
 
 struct BitmapRGB {
@@ -345,6 +345,57 @@ void shrinkTile(uint32_t aZ, uint32_t aX, uint32_t aY,
   if (totalFound) {
     writePNG(path.c_str(), PNG_COLOR_TYPE_RGB, lines);
   }
+}
+
+inline void composeJSPath(std::string& aPath, 
+                          uint32_t aZ, uint32_t aX, uint32_t aY, bool aMkdir) {
+
+  if (aMkdir) {
+    mkdir(aPath.c_str(), 0755);
+  }
+
+  aPath += std::to_string(aZ);
+  if (aMkdir) {
+    mkdir(aPath.c_str(), 0755);
+  }
+
+  aPath += "/";
+  aPath += std::to_string(aX);
+  if (aMkdir) {
+    mkdir(aPath.c_str(), 0755);
+  }
+
+  aPath += "/";
+  aPath += std::to_string(aY);
+  aPath += ".js";
+}
+
+void createAltitudeFile(uint32_t aZ, uint32_t aX, uint32_t aY,
+                        const HimawariStandardData& aData,
+                        const CloudTopAltitude& aTable) {
+  TileMapService tile;
+  tile.init(aZ, aX, aY);
+
+  std::string path("./rad010203/");
+  composeJSPath(path, aZ, aX, aY, true);
+  std::ofstream output(path);
+
+  output << "var altitude = new Float64Array([\n";
+  for (int i = 0; i < 256; i++) {
+    double latitude = tile.latitude(i);
+    for (int j = 0; j < 256; j++) {
+      double longitude = tile.longitude(j);
+      double tb11, tb12;
+      aData.brightnessTemperaturesAt(longitude, latitude, tb11, tb12);
+      double zenith = aData.mSegments[0].zenith(longitude, latitude) * 180. /M_PI;
+      double altitude = aTable.linear(tb11, tb12, zenith);
+      if (altitude < 0.) {
+        altitude = 0.;
+      }
+      output << altitude << "," << std::endl;
+    }
+  }
+  output << "]);\n";
 }
 
 } // hsd2tms
