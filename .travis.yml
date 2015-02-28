@@ -18,6 +18,9 @@ script:
   - make debug
   - make
   - make check
+  - make release
+  - make
+  - make test
 
 branches:
   only:
