@@ -1,0 +1,20 @@
+language: cpp
+
+compiler:
+  - gcc
+
+before_script:
+  - sudo apt-get install libpng
+  - sudo apt-get install cpputest
+  - mkdir build
+  - cd build
+  - cmake ..
+
+script:
+  - make debug
+  - make
+  - make check
+
+branches:
+  only:
+    - master
