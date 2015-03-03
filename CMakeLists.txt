@@ -52,17 +52,12 @@ endif(CMAKE_BUILD_TYPE MATCHES "Scan")
 
 configure_file("${PROJECT_SOURCE_DIR}/src/test.sh.in"
                test.sh)
-ADD_CUSTOM_TARGET(test /bin/bash test.sh)
-
 
 add_library(${PROJECT_NAME}util STATIC src/hsd2tms.cpp)
 add_executable(${PROJECT_NAME} src/main.cpp)
 target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME}util)
 
-
-option(USE_MAKE_CHECK "Enaables 'make check' command." ON)
-
-# cpputest
+option(USE_MAKE_CHECK "Enables 'make check' command." ON)
 if (USE_MAKE_CHECK)
   pkg_check_modules(CPPUTEST cpputest)
   INCLUDE_DIRECTORIES(${CPPUTEST_INCLUDE_DIRS})

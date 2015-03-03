@@ -2,6 +2,8 @@
 #define HIMAWARI_STANDARD_DATA
 #include <math.h>
 #include <vector>
+#include <algorithm>
+#include <assert.h>
 namespace hsd2tms {
 #pragma pack(1)
 
@@ -619,11 +621,6 @@ struct HimawariStandardDataSegment {
   }
 };
 
-enum DataType {
-  TypeRadiation,
-  TypeTemperature
-};
-
 struct HimawariStandardDataBand {
   HimawariStandardDataBand() {}
   std::vector<HimawariStandardDataSegment*> mSegments;
@@ -690,38 +687,8 @@ struct HimawariStandardDataBand {
     const CalibrationInfoBlockBody& calibration =
       mSegments[0]->mCalibrationInfoBlock.body;
     count &= (0xFFFF >> (16 - calibration.mValidBits));
+
     return (double(count) * calibration.mCoefficient) + calibration.mConstant;
-  }
-
-  uint8_t normalizedRadiationAt(double aLongitude, double aLatitude) const {
-    double radiation = radiationAt(aLongitude, aLatitude);
-    static const double kMaxRadiation[16] = 
-      {300., 280., 260., 300., 40., 10., 1., 1.5,
-       3., 3., 3., 3., 3., 3., 3., 3.};
-#if 0
-band: 0
-championR: 596.924
-band: 1
-championR: 570.674
-band: 2
-championR: 526.357
-band: 3
-championR: 313.535
-band: 4
-championR: 42.1191
-band: 5
-championR: 10.1764
-band: 6
-championR: 0.981368
-band: 7
-championR: 1.44067
-band: 8
-championR: 2.85773
-
-#endif
-    uint8_t band = mSegments[0]->band() - 1;
-    const double& max = kMaxRadiation[(band & 0xF)];
-    return (max < radiation)? 0xFF : uint8_t((radiation * 255.) / max);
   }
 
   double temperatureAt(double aLongitude, double aLatitude) const {
@@ -750,35 +717,6 @@ championR: 2.85773
     const double& c2 = infrared.mC2;
 
     return c0 + (c1 * t) + (c2 * pow(t, 2));
-  }
-
-  uint8_t normalizedTemperatureAt(double aLongitude, double aLatitude) const {
-    double temperature = temperatureAt(aLongitude, aLatitude);
-    temperature -= 273.15;
-
-    if (temperature < -40.) {
-      temperature = - 40.;
-    }
-
-    if (40. <= temperature) {
-      temperature = 40.;
-    }
-
-    uint32_t norm = floor((temperature + 40. ) * 255. / 80.);
-    return uint8_t(norm);
-  }
-
-  uint8_t normalizedDataAt(double aLongitude, double aLatitude,
-                           DataType aType) const {
-    switch(aType) {
-      case TypeRadiation:
-        return normalizedRadiationAt(aLongitude, aLatitude);
-        break;
-      case TypeTemperature:
-        return normalizedTemperatureAt(aLongitude, aLatitude);
-        break;
-    }
-    return 0;
   }
 
   inline void sort() {
@@ -823,22 +761,6 @@ struct HimawariStandardData {
       mBands[13].brightnessTemperatureAt(longitude, latitude) : 0.;
     aTb12 = (mBands[14].hasData())? 
       mBands[14].brightnessTemperatureAt(longitude, latitude) : 0.;
-  }
-
-  inline static const char* typeTag(DataType aType) {
-    static const char rad[] = "rad";
-    static const char tem[] = "tem";
-    static const char unknown[] = "unknown";
-
-    switch(aType) {
-      case TypeRadiation:
-        return rad;
-        break;
-      case TypeTemperature:
-        return tem;
-        break;
-    }
-    return unknown;
   }
 };
 } // hsd2tms

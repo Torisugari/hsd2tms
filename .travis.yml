@@ -20,7 +20,7 @@ script:
   - make check
   - make release
   - make
-  - make test
+  - sh test.sh
 
 branches:
   only:
