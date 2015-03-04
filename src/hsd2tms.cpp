@@ -1,34 +1,13 @@
 #include <iostream>
 #include <iomanip>
 #include <sstream>
+#include <cstring>
 #include <sys/stat.h>
 #include <fstream>
 #include "png.h"
 #include "hsd2tms.h"
 
 namespace hsd2tms {
-
-void writePNG(const char* aFileName, uint8_t aColorType, uint8_t** aLines) {
-  //XXX Do error handling!
-  FILE* fp = fopen(aFileName, "wb");
-  png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, 0, 0, 0);
-  png_infop info_ptr = png_create_info_struct(png_ptr);
-  setjmp(png_jmpbuf(png_ptr));
-  png_init_io(png_ptr, fp);
-
-  info_ptr->width = 256;
-  info_ptr->height = 256;
-  info_ptr->bit_depth = 8;
-  info_ptr->color_type = aColorType;
-  info_ptr->interlace_type = PNG_INTERLACE_NONE;
-  info_ptr->compression_type = PNG_COMPRESSION_TYPE_DEFAULT;
-  info_ptr->filter_type = PNG_FILTER_TYPE_DEFAULT;
-
-  png_set_rows(png_ptr, info_ptr, aLines);
-  png_write_png(png_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, 0);
-  png_destroy_write_struct(&png_ptr, 0);
-  fclose(fp);
-}
 
 inline void composePath(std::string& aPath, 
                         uint32_t aZ, uint32_t aX, uint32_t aY, bool aMkdir) {
@@ -52,13 +31,60 @@ inline void composePath(std::string& aPath,
   aPath += ".png";
 }
 
+struct PNGPalette {
+  png_color mPaletteTable[256];
+  uint8_t mAlphaTable[256];
+  PNGPalette& operator= (const PNGPalette& aSource) {
+    std::memcpy(mPaletteTable, aSource.mPaletteTable, sizeof(mPaletteTable));
+    std::memcpy(mAlphaTable, aSource.mAlphaTable, sizeof(mAlphaTable));
+    return (*this);
+  }
+};
+
+// Helper class to fill mPaletteTable / mAlphaTable effectively.
+class SingleColorPalette: public PNGPalette {
+private:
+  void Init(const png_color& aColor) {
+    std::fill(std::begin(mPaletteTable), std::end(mPaletteTable), aColor);
+    // Simple gradation with [alpha = index].
+    for (int i = 0; i < 256; i++) {
+      mAlphaTable[i] = i;
+    }
+  }
+public:
+  SingleColorPalette() {
+    png_color color = {0, 0, 0};
+    Init(color);
+  }
+  SingleColorPalette(uint8_t aRed, uint8_t aGreen, uint8_t aBlue) {
+    png_color color = {aRed, aGreen, aBlue};
+    Init(color);
+  }
+  SingleColorPalette(const png_color& aColor) {
+    Init(aColor);
+  }
+};
+
+// Palette a la thermography.
+class ThermographPalette: public PNGPalette {
+public:
+  ThermographPalette() {
+    std::fill(std::begin(mAlphaTable), std::end(mAlphaTable), 0xCC);
+    for (int i = 0; i < 256; i++) {
+      mPaletteTable[i].red = (i * i / 0xFF);
+      mPaletteTable[i].green = 0xFF - ((i - 0x7f) * (i - 0x7f) / 0x40);
+      mPaletteTable[i].blue = ((0xFF - i) * (0xFF - i)/ 0xFF);
+    }
+  }
+};
+
 // Note: T is either |uint8_t[2]| or |uint8_t[3]|, which corresponds
 //       gray+alpha bitmap or RGB bitmap respectively.
 template<typename T, const uint8_t _PNG_COLOR_TYPE>
 struct TileBitmap {
   T mData[256][256];
   uint8_t* mLines[256];
-
+  PNGPalette mPalette;
   TileBitmap() {
     fillZero();
     for (int i = 0; i < 256; i++) {
@@ -74,8 +100,32 @@ struct TileBitmap {
     return _PNG_COLOR_TYPE;
   }
 
-  void writeThisPNG(const char* aFileName) {
-    writePNG(aFileName, _PNG_COLOR_TYPE, mLines);
+  void writePNG(const char* aFileName) {
+    //XXX Do error handling!
+    FILE* fp = fopen(aFileName, "wb");
+    png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, 0, 0, 0);
+    png_infop info_ptr = png_create_info_struct(png_ptr);
+    setjmp(png_jmpbuf(png_ptr));
+    png_init_io(png_ptr, fp);
+
+    info_ptr->width = 256;
+    info_ptr->height = 256;
+    info_ptr->bit_depth = 8;
+    info_ptr->color_type = _PNG_COLOR_TYPE;
+    info_ptr->interlace_type = PNG_INTERLACE_NONE;
+    info_ptr->compression_type = PNG_COMPRESSION_TYPE_DEFAULT;
+    info_ptr->filter_type = PNG_FILTER_TYPE_DEFAULT;
+
+    // Expecting static-if
+    if (PNG_COLOR_MASK_PALETTE & _PNG_COLOR_TYPE) {
+      png_set_tRNS(png_ptr, info_ptr, mPalette.mAlphaTable, 256, nullptr);
+      png_set_PLTE(png_ptr, info_ptr, mPalette.mPaletteTable, 256);
+    }
+
+    png_set_rows(png_ptr, info_ptr, mLines);
+    png_write_png(png_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, 0);
+    png_destroy_write_struct(&png_ptr, 0);
+    fclose(fp);
   }
 
   bool readPNG(const char* aFileName) {
@@ -111,13 +161,31 @@ struct TileBitmap {
     assert(_PNG_COLOR_TYPE == png_get_color_type(png_ptr, info_ptr));
     assert(8 == png_get_bit_depth(png_ptr, info_ptr));
 
+    // Expecting static-if
+    if (PNG_COLOR_MASK_PALETTE & _PNG_COLOR_TYPE) {
+      int size;
+      png_color_16p value;
+
+      uint8_t* alpha;;
+      png_get_tRNS(png_ptr, info_ptr, &alpha, &size, &value);
+      assert(256 == size);
+      //assert(nullptr == value);
+      std::memcpy(mPalette.mAlphaTable, alpha, sizeof(mPalette.mAlphaTable));
+
+      png_color* palette;
+      png_get_PLTE(png_ptr, info_ptr, &palette, &size);
+      assert(256 == size);
+      std::memcpy(mPalette.mPaletteTable, palette, sizeof(mPalette.mPaletteTable));
+    }
+
     uint8_t* row = &(mData[0][0][0]);
     for (int i = 0; i < 256; i++) {
       png_read_rows(png_ptr, &row, png_bytepp_NULL, 1);
-      row += sizeof(mData[0]);
+      row += sizeof(T) * 256;
     }
-
+    png_destroy_read_struct(&png_ptr, &info_ptr, nullptr);
     fclose(fp);
+
     return true;
   }
 
@@ -169,10 +237,18 @@ struct TileBitmap {
     totalFound |= readAndQuaterCopy(aSrc, aParent, aZ, aX, aY, 1, 1);
 
     if (totalFound) {
-      writeThisPNG(path.c_str());
+      // Expecting static-if
+      if (PNG_COLOR_MASK_PALETTE & _PNG_COLOR_TYPE) {
+        mPalette = aSrc.mPalette;
+      }
+      writePNG(path.c_str());
     }
   }
 };
+
+typedef TileBitmap<uint8_t[3], PNG_COLOR_TYPE_RGB> RGBTile;
+typedef TileBitmap<uint8_t[2], PNG_COLOR_TYPE_GA> GATile;
+typedef TileBitmap<uint8_t[1], PNG_COLOR_TYPE_PALETTE> PaletteTile;
 
 static const double kMaxRadiation[16] = 
   {300., 280., 260., 300., 40., 10., 1., 1.5,
@@ -267,38 +343,27 @@ void createTile(const std::string& aDir, uint32_t aZ, uint32_t aX, uint32_t aY,
   composePath(path, aZ, aX, aY, true);
   std::cout << "Creating " << path << std::endl;
 
-  if (TypeRadiation == aType) {
-    uint8_t data[256][256][2] = {{{0}}};
-    uint8_t* lines[256];
+  PaletteTile bitmap;
+  static const PNGPalette pink = SingleColorPalette(0xFF, 0xCC, 0xCC);
+  static const PNGPalette thermo = ThermographPalette();
 
-    for (int i = 0; i < 256; i++) {
-      lines[i] = &data[i][0][0];
-      double latitude = tile.latitude(i);
-      for (int j = 0; j < 256; j++) {
-        double longitude = tile.longitude(j);
-        data[i][j][1] = normalizedData(aData, longitude, latitude, aType, aBand);
-      }
-      writePNG(path.c_str(), PNG_COLOR_TYPE_GRAY_ALPHA, lines);
-    }
-  } 
-  else {
-    uint8_t data[256][256][3] = {{{0}}};
-    uint8_t* lines[256];
-
-    for (int i = 0; i < 256; i++) {
-      lines[i] = &data[i][0][0];
-      double latitude = tile.latitude(i);
-      for (int j = 0; j < 256; j++) {
-        double longitude = tile.longitude(j);
-        uint32_t tmp = normalizedData(aData, longitude, latitude, aType, aBand);
-
-        data[i][j][0] = uint8_t(tmp);
-        data[i][j][1] = uint8_t((tmp < 0x80)? (0x80 + tmp/2) : (0xFF - tmp/2));
-        data[i][j][2] = uint8_t(0xFF - tmp);
-      }
-    }
-    writePNG(path.c_str(), PNG_COLOR_TYPE_RGB, lines);
+  switch (aType) {
+  case TypeTemperature:
+    bitmap.mPalette = thermo;
+    break;
+  default:
+    bitmap.mPalette = pink;
+    break;
   }
+
+  for (int i = 0; i < 256; i++) {
+    double latitude = tile.latitude(i);
+    for (int j = 0; j < 256; j++) {
+      double longitude = tile.longitude(j);
+      bitmap.mData[i][j][0] = normalizedData(aData, longitude, latitude, aType, aBand);
+    }
+  }
+  bitmap.writePNG(path.c_str());
 }
 
 void createTile(const std::string& aDir, uint32_t aZ, uint32_t aX, uint32_t aY,
@@ -311,18 +376,28 @@ void createTile(const std::string& aDir, uint32_t aZ, uint32_t aX, uint32_t aY,
   std::string path(aDir);
   composePath(path, aZ, aX, aY, true);
   std::cout << "Creating " << path << std::endl;
-    uint8_t data[256][256][2] = {{{0}}};
-    uint8_t* lines[256];
 
-    for (int i = 0; i < 256; i++) {
-      lines[i] = &data[i][0][0];
-      double latitude = tile.latitude(i);
-      for (int j = 0; j < 256; j++) {
-        double longitude = tile.longitude(j);
-        data[i][j][1] = normalizedData(aData, longitude, latitude, aType, aBand0, aBand1);
-      }
+  PaletteTile bitmap;
+  static const PNGPalette yellow = SingleColorPalette(0xFF, 0xFF, 0x00);
+  static const PNGPalette pink = SingleColorPalette(0xFF, 0xCC, 0xCC);
+
+  switch (aType) {
+  case TypeDust:
+    bitmap.mPalette = yellow;
+    break;
+  default:
+    bitmap.mPalette = pink;
+    break;
+  }
+
+  for (int i = 0; i < 256; i++) {
+    double latitude = tile.latitude(i);
+    for (int j = 0; j < 256; j++) {
+      double longitude = tile.longitude(j);
+      bitmap.mData[i][j][0] = normalizedData(aData, longitude, latitude, aType, aBand0, aBand1);
     }
-    writePNG(path.c_str(), PNG_COLOR_TYPE_GRAY_ALPHA, lines);
+  }
+  bitmap.writePNG(path.c_str());
 }
 
 void createTile(const std::string& aDir, uint32_t aZ, uint32_t aX, uint32_t aY,
@@ -336,21 +411,18 @@ void createTile(const std::string& aDir, uint32_t aZ, uint32_t aX, uint32_t aY,
   composePath(path, aZ, aX, aY, true);
   std::cout << "Creating " << path << std::endl;
 
-  static png_byte data[256][256][3] = {{{0}}};
-  png_byte* lines[256];
+  RGBTile bitmap;
 
   for (int i = 0; i < 256; i++) {
-    lines[i] = &data[i][0][0];
     double latitude = tile.latitude(i);
     for (int j = 0; j < 256; j++) {
       double longitude = tile.longitude(j);
-      data[i][j][0] = normalizedData(aData, longitude, latitude, aType, aBand2);
-      data[i][j][1] = normalizedData(aData, longitude, latitude, aType, aBand1);
-      data[i][j][2] = normalizedData(aData, longitude, latitude, aType, aBand0);
+      bitmap.mData[i][j][0] = normalizedData(aData, longitude, latitude, aType, aBand2);
+      bitmap.mData[i][j][1] = normalizedData(aData, longitude, latitude, aType, aBand1);
+      bitmap.mData[i][j][2] = normalizedData(aData, longitude, latitude, aType, aBand0);
     }
   }
-
-  writePNG(path.c_str(), PNG_COLOR_TYPE_RGB, lines);
+  bitmap.writePNG(path.c_str());
 }
 
 void createTile(uint32_t aZ, uint32_t aX, uint32_t aY,
@@ -386,25 +458,10 @@ void shrinkTile(uint32_t aZ, uint32_t aX, uint32_t aY,
   std::string parent;
   DirNameProvider::compose(parent, aType, aBand);
 
-  switch (aType) {
-  case TypeRadiation:
-  case TypeDust:
-    {
-      static TileBitmap<uint8_t[2], PNG_COLOR_TYPE_GRAY_ALPHA> src;
-      static TileBitmap<uint8_t[2], PNG_COLOR_TYPE_GRAY_ALPHA> dst;
-      dst.fillZero();
-      dst.shrinkTile(src, parent, aZ, aX, aY);
-    }
-    break;
-  default:
-    {
-      static TileBitmap<uint8_t[3], PNG_COLOR_TYPE_RGB> src;
-      static TileBitmap<uint8_t[3], PNG_COLOR_TYPE_RGB> dst;
-      dst.fillZero();
-      dst.shrinkTile(src, parent, aZ, aX, aY);
-    }
-    break;
-  }
+  static PaletteTile src;
+  static PaletteTile dst;
+  dst.fillZero();
+  dst.shrinkTile(src, parent, aZ, aX, aY);
 }
 
 void shrinkTile(uint32_t aZ, uint32_t aX, uint32_t aY,
@@ -413,8 +470,8 @@ void shrinkTile(uint32_t aZ, uint32_t aX, uint32_t aY,
   std::string parent;
   DirNameProvider::compose(parent, aType, aBand0, aBand1, aBand2);
 
-  static TileBitmap<uint8_t[3], PNG_COLOR_TYPE_RGB> src;
-  static TileBitmap<uint8_t[3], PNG_COLOR_TYPE_RGB> dst;
+  static RGBTile src;
+  static RGBTile dst;
   dst.fillZero();
   dst.shrinkTile(src, parent, aZ, aX, aY);
 }

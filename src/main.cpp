@@ -170,6 +170,52 @@ void createJapanTiles(int32_t aMinZoomLevel, const HimawariStandardData& aData,
   }
 }
 
+void createJapanTiles(int32_t aMinZoomLevel, const HimawariStandardData& aData,
+                      DataType aType,
+                      uint32_t aBand) {
+  if (aMinZoomLevel > 7) {
+    return;
+  }
+
+  if (!aData.mBands[aBand].hasData()) {
+    return;
+  }
+
+  // lv8 Etorofu: 8/233/91
+  // lv8 Yonakuni: 8/215/110
+  // lv8 Okinotori: 8/224/113
+  // lv8 Minamitori: 8/237/110
+  static const uint32_t kJapanLeft8 = 214;
+  static const uint32_t kJapanRight8 = 237;
+  static const uint32_t kJapanTop8 = 90;
+  static const uint32_t kJapanBottom8 = 114;
+
+  uint32_t left = kJapanLeft8;
+  uint32_t right = kJapanRight8;
+  uint32_t top = kJapanTop8;
+  uint32_t bottom = kJapanBottom8;
+
+  int32_t z = 8;
+  for (uint32_t x = left; x <= right; x++) {
+    for (uint32_t y = top; y < bottom; y++) {
+      createTile(z, x, y, aData, aType, aBand);
+    }
+  }
+
+  for (z-- ; z >= aMinZoomLevel; z--) {
+    left = left >> 1;
+    right = right >> 1;
+    top = top >> 1;
+    bottom = bottom >> 1;
+
+    for (uint32_t x = left; x <= right; x++) {
+      for (uint32_t y = top; y <= bottom; y++) {
+        shrinkTile(z, x, y, aType, aBand);
+      }
+    }
+  }
+}
+
 } // hsd2tms
 
 int main (int argc, char* argv[]) {
@@ -180,10 +226,12 @@ int main (int argc, char* argv[]) {
   }
   himawariData.sort();
 
+  hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeDust, 12, 13);
+  hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 1);
+  hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeTemperature, 14);
+#if 0
   hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 0, 1, 2);
   hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 3, 4, 5);
-  hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeDust, 12, 13);
-#if 0
 
   hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 0, 1, 2);
   hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 3, 4, 5);
