@@ -26,6 +26,9 @@
 #include <iostream>
 #include <iomanip>
 
+#include <cstring>
+#include "png.h"
+
 #include "HimawariStandardData.h"
 #include "TileMapService.h"
 #include "CloudTopAltitude.h"
@@ -91,6 +94,61 @@ public:
     aPath += "/";
   }
 };
+
+struct PNGPalette {
+  png_color mPaletteTable[256];
+  uint8_t mAlphaTable[256];
+  PNGPalette& operator= (const PNGPalette& aSource) {
+    std::memcpy(mPaletteTable, aSource.mPaletteTable, sizeof(mPaletteTable));
+    std::memcpy(mAlphaTable, aSource.mAlphaTable, sizeof(mAlphaTable));
+    return (*this);
+  }
+};
+
+// Helper class to fill mPaletteTable / mAlphaTable effectively.
+class SingleColorPalette: public PNGPalette {
+private:
+  void Init(const png_color& aColor) {
+    std::fill(std::begin(mPaletteTable), std::end(mPaletteTable), aColor);
+    // Simple gradation with [alpha = index].
+    for (int i = 0; i < 256; i++) {
+      mAlphaTable[i] = i;
+    }
+  }
+public:
+  SingleColorPalette() {
+    png_color color = {0, 0, 0};
+    Init(color);
+  }
+  SingleColorPalette(uint8_t aRed, uint8_t aGreen, uint8_t aBlue) {
+    png_color color = {aRed, aGreen, aBlue};
+    Init(color);
+  }
+  SingleColorPalette(const png_color& aColor) {
+    Init(aColor);
+  }
+};
+
+// Palette a la thermography.
+class ThermographPalette: public PNGPalette {
+  ThermographPalette() {
+    std::fill(std::begin(mAlphaTable), std::end(mAlphaTable), 0xCC);
+    for (int i = 0; i < 256; i++) {
+      mPaletteTable[i].red = (i * i / 0xFF);
+      mPaletteTable[i].green = 0xFF - ((i - 0x7f) * (i - 0x80) / 0x40);
+      mPaletteTable[i].blue = ((0xFF - i) * (0xFF - i)/ 0xFF);
+    }
+  }
+  ThermographPalette(const PNGPalette& aSource) = delete;
+public:
+  PNGPalette& operator= (const PNGPalette& aSource) = delete;
+
+  static PNGPalette& getInstance() {
+    static ThermographPalette instance;
+    return instance;
+  }
+};
+
 void createTile(uint32_t aZ, uint32_t aX, uint32_t aY,
                 const HimawariStandardData& aData, DataType aType,
                 uint32_t aBand);

@@ -101,6 +101,35 @@ TEST(TileMapServiceTest, coordCheck) {
   DOUBLES_EQUAL(1.48387, tmsData.latitude(0), 0.00001);
 }
 
+// <hsd2tms.h>
+TEST_GROUP(hsd2tmsUtil) {
+  TEST_SETUP() {}
+  TEST_TEARDOWN() {}
+};
+
+TEST(hsd2tmsUtil, ThermographPalette) {
+  hsd2tms::PNGPalette& thermo = hsd2tms::ThermographPalette::getInstance();
+
+  BYTES_EQUAL(0xCC, thermo.mAlphaTable[0]);
+  BYTES_EQUAL(0xCC, thermo.mAlphaTable[0xFF]);
+
+  BYTES_EQUAL(0x00, thermo.mPaletteTable[0x00].red);
+  BYTES_EQUAL(0x01, thermo.mPaletteTable[0x00].green);
+  BYTES_EQUAL(0xFF, thermo.mPaletteTable[0x00].blue);
+
+  BYTES_EQUAL(0x3F, thermo.mPaletteTable[0x7F].red);
+  BYTES_EQUAL(0xFF, thermo.mPaletteTable[0x7F].green);
+  BYTES_EQUAL(0x40, thermo.mPaletteTable[0x7F].blue);
+
+  BYTES_EQUAL(0x40, thermo.mPaletteTable[0x80].red);
+  BYTES_EQUAL(0xFF, thermo.mPaletteTable[0x80].green);
+  BYTES_EQUAL(0x3F, thermo.mPaletteTable[0x80].blue);
+
+  BYTES_EQUAL(0xFF, thermo.mPaletteTable[0xFF].red);
+  BYTES_EQUAL(0x01, thermo.mPaletteTable[0xFF].green);
+  BYTES_EQUAL(0x00, thermo.mPaletteTable[0xFF].blue);
+}
+
 int main (int argc, char* argv[]) {
   return RUN_ALL_TESTS(argc, argv);
 }

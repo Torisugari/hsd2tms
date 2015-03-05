@@ -27,8 +27,8 @@ void createTiles(uint32_t aMaxZoomLevel, const HimawariStandardData& aData,
                  DataType aType,
                  uint32_t aBand0, uint32_t aBand1, uint32_t aBand2) {
   if (!aData.mBands[aBand0].hasData() &&
-      !aData.mBands[aBand0].hasData() &&
-      !aData.mBands[aBand0].hasData()) {
+      !aData.mBands[aBand1].hasData() &&
+      !aData.mBands[aBand2].hasData()) {
     return;
   }
 
@@ -45,6 +45,32 @@ void createTiles(uint32_t aMaxZoomLevel, const HimawariStandardData& aData,
     for (uint32_t x = 0; x < max; x++) {
       for (uint32_t y = 0; y < max; y++) {
         shrinkTile(z, x, y, aType, aBand0, aBand1, aBand2);
+      }
+    }
+  }
+}
+
+void createTiles(uint32_t aMaxZoomLevel, const HimawariStandardData& aData,
+                 DataType aType,
+                 uint32_t aBand0, uint32_t aBand1) {
+  if (!aData.mBands[aBand0].hasData() &&
+      !aData.mBands[aBand1].hasData()) {
+    return;
+  }
+
+  int32_t z = aMaxZoomLevel;
+  uint32_t max = 1 << z;
+  for (uint32_t x = 0; x < max; x++) {
+    for (uint32_t y = 0; y < max; y++) {
+      createTile(z, x, y, aData, aType, aBand0, aBand1);
+    }
+  }
+
+  for (z--; z >= 0; z--) {
+    max = 1 << z;
+    for (uint32_t x = 0; x < max; x++) {
+      for (uint32_t y = 0; y < max; y++) {
+        shrinkTile(z, x, y, aType, aBand0);
       }
     }
   }
@@ -227,16 +253,15 @@ int main (int argc, char* argv[]) {
   himawariData.sort();
 
   hsd2tms::colorchart();
+  hsd2tms::createTiles(8, himawariData, hsd2tms::TypeRadiation, 0, 1, 2);
+  hsd2tms::createTiles(8, himawariData, hsd2tms::TypeRadiation, 3, 4, 5);
+  hsd2tms::createTiles(8, himawariData, hsd2tms::TypeTemperature, 14);
+  hsd2tms::createTiles(8, himawariData, hsd2tms::TypeDust, 14, 15);
 
+#if 0
   hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeDust, 12, 13);
   hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 1);
   hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeTemperature, 14);
-#if 0
-  hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 0, 1, 2);
-  hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 3, 4, 5);
-
-  hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 0, 1, 2);
-  hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 3, 4, 5);
 
   hsd2tms::createTiles(6, himawariData, hsd2tms::TypeRadiation, 3, 4, 5);
   hsd2tms::createTiles(5, himawariData, hsd2tms::TypeTemperature, 14);
