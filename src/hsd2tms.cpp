@@ -1,3 +1,24 @@
+/* 
+ *    Copyright (C) 2015 Torisugari <torisugari@gmail.com>
+ *
+ *     Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ *     The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ *    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ */
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -67,33 +88,40 @@ public:
 
 // Palette a la thermography.
 class ThermographPalette: public PNGPalette {
-public:
   ThermographPalette() {
     std::fill(std::begin(mAlphaTable), std::end(mAlphaTable), 0xCC);
     for (int i = 0; i < 256; i++) {
       mPaletteTable[i].red = (i * i / 0xFF);
-      mPaletteTable[i].green = 0xFF - ((i - 0x7f) * (i - 0x7f) / 0x40);
+      mPaletteTable[i].green = 0xFF - ((i - 0x7f) * (i - 0x80) / 0x40);
       mPaletteTable[i].blue = ((0xFF - i) * (0xFF - i)/ 0xFF);
     }
+  }
+  ThermographPalette(const PNGPalette& aSource) = delete;
+public:
+  PNGPalette& operator= (const PNGPalette& aSource) = delete;
+
+  static PNGPalette& getInstance() {
+    static ThermographPalette instance;
+    return instance;
   }
 };
 
 // Note: T is either |uint8_t[2]| or |uint8_t[3]|, which corresponds
 //       gray+alpha bitmap or RGB bitmap respectively.
-template<typename T, const uint8_t _PNG_COLOR_TYPE>
+template<typename T, const uint8_t _PNG_COLOR_TYPE, int _WIDTH, int _HEIGHT>
 struct TileBitmap {
-  T mData[256][256];
-  uint8_t* mLines[256];
+  T mData[_HEIGHT][_WIDTH];
+  uint8_t* mLines[_HEIGHT];
   PNGPalette mPalette;
   TileBitmap() {
     fillZero();
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < _HEIGHT; i++) {
       mLines[i] = &mData[i][0][0];
     }
   }
 
   void fillZero() {
-    std::fill(&mData[0][0][0], &mData[256][0][0], 0);
+    std::fill(&mData[0][0][0], &mData[_HEIGHT][0][0], 0);
   }
 
   inline uint8_t colorType() const {
@@ -108,8 +136,8 @@ struct TileBitmap {
     setjmp(png_jmpbuf(png_ptr));
     png_init_io(png_ptr, fp);
 
-    info_ptr->width = 256;
-    info_ptr->height = 256;
+    info_ptr->width = _WIDTH;
+    info_ptr->height = _HEIGHT;
     info_ptr->bit_depth = 8;
     info_ptr->color_type = _PNG_COLOR_TYPE;
     info_ptr->interlace_type = PNG_INTERLACE_NONE;
@@ -143,7 +171,6 @@ struct TileBitmap {
     assert(read == 8);
     assert(0 == png_sig_cmp(header, 0, 8));
 
-
     png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING,
                                                  nullptr, nullptr, nullptr);
     assert(png_ptr);
@@ -156,8 +183,8 @@ struct TileBitmap {
 
     png_read_info(png_ptr, info_ptr);
 
-    assert(256 == png_get_image_width(png_ptr, info_ptr));
-    assert(256 == png_get_image_height(png_ptr, info_ptr));
+    assert(_WIDTH == png_get_image_width(png_ptr, info_ptr));
+    assert(_HEIGHT == png_get_image_height(png_ptr, info_ptr));
     assert(_PNG_COLOR_TYPE == png_get_color_type(png_ptr, info_ptr));
     assert(8 == png_get_bit_depth(png_ptr, info_ptr));
 
@@ -179,9 +206,9 @@ struct TileBitmap {
     }
 
     uint8_t* row = &(mData[0][0][0]);
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < _HEIGHT; i++) {
       png_read_rows(png_ptr, &row, png_bytepp_NULL, 1);
-      row += sizeof(T) * 256;
+      row += sizeof(T) * _WIDTH;
     }
     png_destroy_read_struct(&png_ptr, &info_ptr, nullptr);
     fclose(fp);
@@ -189,14 +216,14 @@ struct TileBitmap {
     return true;
   }
 
-  inline void quarterCopy(TileBitmap<T,_PNG_COLOR_TYPE>& aSrc,
+  inline void quarterCopy(TileBitmap<T, _PNG_COLOR_TYPE, _WIDTH, _HEIGHT>& aSrc,
                           uint32_t aMatrixX, size_t aMatrixY) {
     const size_t colors = sizeof(T);
-    const size_t offsetX = aMatrixX * 128;
-    const size_t offsetY = aMatrixY * 128;
+    const size_t offsetX = aMatrixX * (_WIDTH / 2);
+    const size_t offsetY = aMatrixY * (_HEIGHT / 2);
 
-    for (size_t i = 0; i < 128; i++) {
-      for (size_t j = 0; j < 128; j++) {
+    for (size_t i = 0; i < (_HEIGHT / 2); i++) {
+      for (size_t j = 0; j < (_WIDTH / 2); j++) {
         for (size_t k = 0; k < colors; k++) {
           uint32_t data = aSrc.mData[(i * 2)     ][(j * 2)    ][k] +
                           aSrc.mData[(i * 2)     ][(j * 2) + 1][k] +
@@ -209,7 +236,7 @@ struct TileBitmap {
   }
 
   inline bool
-  readAndQuaterCopy(TileBitmap<T,_PNG_COLOR_TYPE>& aSrc,
+  readAndQuaterCopy(TileBitmap<T, _PNG_COLOR_TYPE, _WIDTH, _HEIGHT>& aSrc,
                     const std::string& aParent,
                     uint32_t aZ, uint32_t aX, uint32_t aY,
                     uint32_t aMatrixX, size_t aMatrixY) {
@@ -222,7 +249,7 @@ struct TileBitmap {
     return found;
   }
 
-  void shrinkTile(TileBitmap<T,_PNG_COLOR_TYPE>& aSrc,
+  void shrinkTile(TileBitmap<T, _PNG_COLOR_TYPE, _WIDTH, _HEIGHT>& aSrc,
                   const std::string& aParent,
                   uint32_t aZ, uint32_t aX, uint32_t aY) {
 
@@ -246,10 +273,20 @@ struct TileBitmap {
   }
 };
 
-typedef TileBitmap<uint8_t[3], PNG_COLOR_TYPE_RGB> RGBTile;
-typedef TileBitmap<uint8_t[2], PNG_COLOR_TYPE_GA> GATile;
-typedef TileBitmap<uint8_t[1], PNG_COLOR_TYPE_PALETTE> PaletteTile;
+typedef TileBitmap<uint8_t[3], PNG_COLOR_TYPE_RGB, 256, 256> RGBTile;
+typedef TileBitmap<uint8_t[2], PNG_COLOR_TYPE_GA, 256, 256> GATile;
+typedef TileBitmap<uint8_t[1], PNG_COLOR_TYPE_PALETTE, 256, 256> PaletteTile;
 
+void colorchart() {
+  TileBitmap<uint8_t[1], PNG_COLOR_TYPE_PALETTE, 256, 10> bitmap;
+  bitmap.mPalette = ThermographPalette::getInstance();
+  for (auto& row: bitmap.mData) {
+    for (int i = 0; i < 256; i++) {
+      row[i][0] = i;
+    }
+  }
+  bitmap.writePNG("./thermo.png");
+}
 static const double kMaxRadiation[16] = 
   {300., 280., 260., 300., 40., 10., 1., 1.5,
    3., 3., 3., 3., 3., 3., 3., 3.};
@@ -345,7 +382,7 @@ void createTile(const std::string& aDir, uint32_t aZ, uint32_t aX, uint32_t aY,
 
   PaletteTile bitmap;
   static const PNGPalette pink = SingleColorPalette(0xFF, 0xCC, 0xCC);
-  static const PNGPalette thermo = ThermographPalette();
+  PNGPalette& thermo = ThermographPalette::getInstance();
 
   switch (aType) {
   case TypeTemperature:
@@ -526,5 +563,4 @@ void createAltitudeFile(uint32_t aZ, uint32_t aX, uint32_t aY,
   }
   output << "]);\n";
 }
-
 } // hsd2tms

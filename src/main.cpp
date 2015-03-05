@@ -226,6 +226,8 @@ int main (int argc, char* argv[]) {
   }
   himawariData.sort();
 
+  hsd2tms::colorchart();
+
   hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeDust, 12, 13);
   hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 1);
   hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeTemperature, 14);
