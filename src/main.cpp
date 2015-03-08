@@ -26,8 +26,8 @@ namespace hsd2tms {
 void createTiles(uint32_t aMaxZoomLevel, const HimawariStandardData& aData,
                  DataType aType,
                  uint32_t aBand0, uint32_t aBand1, uint32_t aBand2) {
-  if (!aData.mBands[aBand0].hasData() &&
-      !aData.mBands[aBand1].hasData() &&
+  if (!aData.mBands[aBand0].hasData() ||
+      !aData.mBands[aBand1].hasData() ||
       !aData.mBands[aBand2].hasData()) {
     return;
   }
@@ -53,7 +53,7 @@ void createTiles(uint32_t aMaxZoomLevel, const HimawariStandardData& aData,
 void createTiles(uint32_t aMaxZoomLevel, const HimawariStandardData& aData,
                  DataType aType,
                  uint32_t aBand0, uint32_t aBand1) {
-  if (!aData.mBands[aBand0].hasData() &&
+  if (!aData.mBands[aBand0].hasData() ||
       !aData.mBands[aBand1].hasData()) {
     return;
   }
@@ -101,27 +101,30 @@ void createTiles(uint32_t aMaxZoomLevel, const HimawariStandardData& aData,
   }
 }
 
+// lv8 Etorofu: 8/233/91
+// lv8 Yonakuni: 8/215/110
+// lv8 Okinotori: 8/224/113
+// lv8 Minamitori: 8/237/110
+static const uint32_t kJapanLeft8 = 214;
+static const uint32_t kJapanRight8 = 237;
+static const uint32_t kJapanTop8 = 90;
+static const uint32_t kJapanBottom8 = 114;
+
 void createJapanTiles(int32_t aMinZoomLevel, const HimawariStandardData& aData,
                       DataType aType,
                       uint32_t aBand0, uint32_t aBand1, uint32_t aBand2) {
   if (aMinZoomLevel > 7) {
     return;
   }
+  std::cout << aData.mBands[aBand0].hasData();
+  std::cout << aData.mBands[aBand1].hasData();
+  std::cout << aData.mBands[aBand2].hasData();
 
-  if (!aData.mBands[aBand0].hasData() &&
-      !aData.mBands[aBand1].hasData() &&
+  if (!aData.mBands[aBand0].hasData() ||
+      !aData.mBands[aBand1].hasData() ||
       !aData.mBands[aBand2].hasData()) {
     return;
   }
-
-  // lv8 Etorofu: 8/233/91
-  // lv8 Yonakuni: 8/215/110
-  // lv8 Okinotori: 8/224/113
-  // lv8 Minamitori: 8/237/110
-  static const uint32_t kJapanLeft8 = 214;
-  static const uint32_t kJapanRight8 = 237;
-  static const uint32_t kJapanTop8 = 90;
-  static const uint32_t kJapanBottom8 = 114;
 
   uint32_t left = kJapanLeft8;
   uint32_t right = kJapanRight8;
@@ -156,19 +159,10 @@ void createJapanTiles(int32_t aMinZoomLevel, const HimawariStandardData& aData,
     return;
   }
 
-  if (!aData.mBands[aBand0].hasData() &&
+  if (!aData.mBands[aBand0].hasData() ||
       !aData.mBands[aBand1].hasData()) {
     return;
   }
-
-  // lv8 Etorofu: 8/233/91
-  // lv8 Yonakuni: 8/215/110
-  // lv8 Okinotori: 8/224/113
-  // lv8 Minamitori: 8/237/110
-  static const uint32_t kJapanLeft8 = 214;
-  static const uint32_t kJapanRight8 = 237;
-  static const uint32_t kJapanTop8 = 90;
-  static const uint32_t kJapanBottom8 = 114;
 
   uint32_t left = kJapanLeft8;
   uint32_t right = kJapanRight8;
@@ -207,15 +201,6 @@ void createJapanTiles(int32_t aMinZoomLevel, const HimawariStandardData& aData,
     return;
   }
 
-  // lv8 Etorofu: 8/233/91
-  // lv8 Yonakuni: 8/215/110
-  // lv8 Okinotori: 8/224/113
-  // lv8 Minamitori: 8/237/110
-  static const uint32_t kJapanLeft8 = 214;
-  static const uint32_t kJapanRight8 = 237;
-  static const uint32_t kJapanTop8 = 90;
-  static const uint32_t kJapanBottom8 = 114;
-
   uint32_t left = kJapanLeft8;
   uint32_t right = kJapanRight8;
   uint32_t top = kJapanTop8;
@@ -244,21 +229,38 @@ void createJapanTiles(int32_t aMinZoomLevel, const HimawariStandardData& aData,
 
 } // hsd2tms
 
+template <typename T>
+void printDuration(const char* aTitle, const T& aStart, const T& aEnd) {
+  std::cout << "Duration (" << aTitle << "): "
+            << double(std::chrono::duration_cast
+                 <std::chrono::microseconds>(aEnd - aStart).count() / 1000) 
+                 / 1000.
+            << " seconds ("
+            << (std::chrono::duration_cast
+                  <std::chrono::seconds>(aEnd - aStart).count() / 60)
+            << " minutes)\n";
+}
+
+
 int main (int argc, char* argv[]) {
-  auto start = std::chrono::system_clock::now();
+  auto t0 = std::chrono::system_clock::now();
+
   hsd2tms::HimawariStandardData himawariData(argc - 1);
   for (int i = 1; i < argc; i++) {
     himawariData.append(argv[i]);
   }
   himawariData.sort();
 
-  hsd2tms::colorchart();
+
+  auto t1 = std::chrono::system_clock::now();
+
+  hsd2tms::createTiles(3, himawariData, hsd2tms::TypeRadiation, 0, 1, 2);
+#if 0
+  hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 0, 1, 2);
+
   hsd2tms::createTiles(8, himawariData, hsd2tms::TypeRadiation, 0, 1, 2);
   hsd2tms::createTiles(8, himawariData, hsd2tms::TypeRadiation, 3, 4, 5);
   hsd2tms::createTiles(8, himawariData, hsd2tms::TypeTemperature, 14);
-  hsd2tms::createTiles(8, himawariData, hsd2tms::TypeDust, 14, 15);
-
-#if 0
   hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeDust, 12, 13);
   hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 1);
   hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeTemperature, 14);
@@ -272,14 +274,11 @@ int main (int argc, char* argv[]) {
                       hsd2tms::TypeRadiation, 0, 1, 2);
 #endif
 
-  auto end = std::chrono::system_clock::now();
-  std::cout << "Duration: "
-            << std::chrono::duration_cast
-                 <std::chrono::microseconds>(end - start).count()
-            << " micro seconds ("
-            << (std::chrono::duration_cast
-                  <std::chrono::seconds>(end - start).count() / 60)
-            << " minutes)\n";
+  auto t2 = std::chrono::system_clock::now();
+
+  hsd2tms::colorchart();
+  printDuration("Load Data", t0, t1);
+  printDuration("Create Files", t1, t2);
   return 0;
 }
 
