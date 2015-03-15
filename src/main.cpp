@@ -241,7 +241,6 @@ void printDuration(const char* aTitle, const T& aStart, const T& aEnd) {
             << " minutes)\n";
 }
 
-
 int main (int argc, char* argv[]) {
   auto t0 = std::chrono::system_clock::now();
 
@@ -254,10 +253,10 @@ int main (int argc, char* argv[]) {
 
   auto t1 = std::chrono::system_clock::now();
 
-  hsd2tms::createTiles(3, himawariData, hsd2tms::TypeRadiation, 0, 1, 2);
-#if 0
   hsd2tms::createJapanTiles(0, himawariData, hsd2tms::TypeRadiation, 0, 1, 2);
+#if 0
 
+  //hsd2tms::createTiles(8, himawariData, hsd2tms::TypeRadiation, 0, 1, 2);
   hsd2tms::createTiles(8, himawariData, hsd2tms::TypeRadiation, 0, 1, 2);
   hsd2tms::createTiles(8, himawariData, hsd2tms::TypeRadiation, 3, 4, 5);
   hsd2tms::createTiles(8, himawariData, hsd2tms::TypeTemperature, 14);
@@ -281,4 +280,3 @@ int main (int argc, char* argv[]) {
   printDuration("Create Files", t1, t2);
   return 0;
 }
-

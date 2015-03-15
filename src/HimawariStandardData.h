@@ -4,6 +4,9 @@
 #include <vector>
 #include <algorithm>
 #include <assert.h>
+
+#define REFACTORING_PLAN1
+
 namespace hsd2tms {
 #pragma pack(1)
 
@@ -473,7 +476,11 @@ struct HimawariStandardDataSegment {
   TimeInfoBlock mTimeInfoBlock;
   ErrorInfoBlock mErrorInfoBlock;
   ReservedBlock mReservedBlock;
+#ifdef REFACTORING_PLAN1
+  std::string mFileName;
+#else
   std::vector<uint16_t> mData;
+#endif
 
   bool isInfrared() const {
     bool isHimawari7 = mBasicInfoBlock.body.mFlag1 & 0x01;
@@ -549,13 +556,17 @@ struct HimawariStandardDataSegment {
 
     assert(mBasicInfoBlock.body.mHeaderSize == read);
 
+#ifdef REFACTORING_PLAN1
+    mFileName = aFileName;
+#else
     mData.resize(mBasicInfoBlock.body.mDataSize / 2);
     read = fread(&(mData[0]), 1, mBasicInfoBlock.body.mDataSize, fp);
     assert(mBasicInfoBlock.body.mDataSize == read);
-
+#endif
     fclose(fp);
   }
 
+#ifndef REFACTORING_PLAN1
   uint16_t countAt(int32_t aX, int32_t aY) {
     aY -= mSegmentInfoBlock.body.mSegmentOffsetY;
     if ((aY < 0 || mDataInfoBlock.body.mHeight <= aY) ||
@@ -568,6 +579,7 @@ struct HimawariStandardDataSegment {
     }
     return mData[index];
   }
+#endif
   uint8_t band() const {
     return mCalibrationInfoBlock.body.mBand;
   }
@@ -619,11 +631,167 @@ struct HimawariStandardDataSegment {
     }
     return atan(d * sinA / foot);
   }
+
+  inline size_t width() const {
+    return mDataInfoBlock.body.mWidth;
+  }
+
+  inline size_t height() const {
+    return mDataInfoBlock.body.mHeight;
+  }
+
+  inline size_t dataSize() const {
+    return mBasicInfoBlock.body.mDataSize;
+  }
+
+  inline size_t headerSize() const {
+    return mBasicInfoBlock.body.mHeaderSize;
+  }
+
 };
 
 struct HimawariStandardDataBand {
   HimawariStandardDataBand() {}
   std::vector<HimawariStandardDataSegment*> mSegments;
+
+#ifdef REFACTORING_PLAN1
+  struct SegmentCompare {
+    SegmentCompare() {}
+    bool operator() (const HimawariStandardDataSegment* aItemL,
+                     const HimawariStandardDataSegment* aItemR) const {
+      return aItemL->mSegmentInfoBlock.body.mSegmentOffsetY <
+             aItemR->mSegmentInfoBlock.body.mSegmentOffsetY;
+    }
+  };
+
+  inline uint16_t countAt(double aLongitude, double aLatitude) const {
+    if (!hasData()) {
+      return 0;
+    }
+    double dataX = 0.;
+    double dataY = 0.;
+    mSegments[0]->mProjectionInfoBlock.body.lonlatToXY(aLongitude, aLatitude,
+                                                       dataX, dataY);
+    mSegments[0]->mPositionInfoBlock.rotate(dataX, dataY, true);
+    mSegments[0]->mPositionInfoBlock.backwardShift(dataX, dataY);
+
+    int32_t intX = int32_t(dataX + 0.5);
+    int32_t intY = int32_t(dataY + 0.5);
+    if (intY < 0 || intX < 0) {
+      return 0;
+    }
+    size_t index = intY * mWidth + intX;
+
+    if (mData.size() <= index) {
+      return 0;
+    }
+
+    return mData[index];
+  }
+
+  bool hasData() const {
+    return !mSegments.empty();
+  }
+
+  double radiationAt(double aLongitude, double aLatitude) const {
+    uint16_t count = countAt(aLongitude, aLatitude);
+
+    if (count & 0x8000) {
+      // 0xFFFF : Error
+      // 0xFFFE : Out of scope
+      return 0.;
+    }
+
+    count &= mBitmask;
+
+    return (double(count) * mCalibrationCoefficient) + mCalibrationConstant;
+  }
+
+  double temperatureAt(double aLongitude, double aLatitude) const {
+    const double rad = radiationAt(aLongitude, aLatitude) * 1000000.;
+    const CalibrationInfoBlockBody& calibration =
+      mSegments[0]->mCalibrationInfoBlock.body;
+    const CalibrationInfoBlockBodyInfrared& infrared = calibration.u.infrared;
+
+    const double& h = infrared.mH;
+    const double& c = infrared.mC;
+    const double& k = infrared.mK;
+    const double l = calibration.mWaveLength / 1000000.;
+
+    double tmp = log(1. + (2. * h * pow(c, 2) / (pow(l, 5) * rad)));
+    return (h * c) / (k * l * tmp) ;
+  }
+
+  double brightnessTemperatureAt(double aLongitude, double aLatitude) const {
+    const double t = temperatureAt(aLongitude, aLatitude);
+    const CalibrationInfoBlockBody& calibration =
+      mSegments[0]->mCalibrationInfoBlock.body;
+    const CalibrationInfoBlockBodyInfrared& infrared = calibration.u.infrared;
+
+    const double& c0 = infrared.mC0;
+    const double& c1 = infrared.mC1;
+    const double& c2 = infrared.mC2;
+
+    return c0 + (c1 * t) + (c2 * pow(t, 2));
+  }
+private:
+  //uint32_t mSegment0OffsetY;
+  uint16_t mBitmask;
+  double mCalibrationCoefficient;
+  double mCalibrationConstant;
+  std::vector<uint16_t> mData;
+  size_t mWidth;
+  size_t mDataLength;
+public:
+  inline void sort() {
+    if (!hasData()) {
+      return;
+    }
+    static const SegmentCompare comp;
+    std::sort(mSegments.begin(), mSegments.end(), comp);
+
+    const CalibrationInfoBlockBody& calibration =
+      mSegments[0]->mCalibrationInfoBlock.body;
+
+    mBitmask = (0xFFFF >> (16 - calibration.mValidBits));
+    mCalibrationCoefficient = calibration.mCoefficient;
+    mCalibrationConstant = calibration.mConstant;
+
+    mWidth = mSegments[0]->width();
+
+    // Copy raw data from file to |std::vecotr<uint16_t> mData|.
+    size_t arraySize = 0;
+    for (HimawariStandardDataSegment* segment: mSegments) {
+      assert(mWidth == segment->width());
+      assert((segment->width()) * (segment->height()) * 2 ==
+             segment->dataSize());
+      arraySize += (segment->width()) * (segment->height());
+    }
+
+    mData.resize(arraySize);
+    uint16_t* ptr = &mData[0];
+
+    for (HimawariStandardDataSegment* segment: mSegments) {
+      FILE* fp = fopen(segment->mFileName.c_str(), "rb");
+      assert(fp);
+#ifndef NDEBUG
+      int rv =
+#endif
+      fseek(fp, segment->headerSize(), SEEK_SET);
+      assert(0 == rv);
+      size_t length = segment->dataSize();
+#ifndef NDEBUG
+      size_t read = 
+#endif
+      fread(ptr, 1, length, fp);
+      fclose(fp);
+
+      assert(length == read);
+      ptr += length / 2;
+    }
+  }
+
+#else
 
   struct LineCompare {
     LineCompare() {}
@@ -723,6 +891,7 @@ struct HimawariStandardDataBand {
     static const SegmentCompare comp;
     std::sort(mSegments.begin(), mSegments.end(), comp);
   }
+#endif
 };
 
 struct HimawariStandardData {
